@@ -989,7 +989,7 @@ dependencies = [
 
 [[package]]
 name = "moq-transport"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "bytes",
