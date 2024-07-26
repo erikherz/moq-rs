@@ -1199,6 +1199,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "moq-subrepub"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "env_logger",
+ "log",
+ "moq-native",
+ "moq-transport",
+ "mp4",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "moq-transport"
 version = "0.5.4"
 dependencies = [
