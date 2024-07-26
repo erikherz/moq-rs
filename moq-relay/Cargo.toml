@@ -12,9 +12,10 @@ keywords = ["quic", "http3", "webtransport", "media", "live"]
 categories = ["multimedia", "network-programming", "web-programming"]
 
 [dependencies]
-moq-transport = { path = "../moq-transport", version = "0.5" }
+moq-transfork = { path = "../moq-transfork", version = "0.1" }
 moq-native = { path = "../moq-native", version = "0.3" }
-moq-api = { path = "../moq-api", version = "0.2" }
+moq-dir = { path = "../moq-dir", version = "0.1" }
+web-transport = { workspace = true }
 
 # QUIC
 url = "2"
@@ -37,8 +38,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 # CLI
 clap = { version = "4", features = ["derive"] }
 
-# Logging
+
 log = { workspace = true }
 env_logger = { workspace = true }
 tracing = "0.1"
-tracing-subscriber = "0.3"
