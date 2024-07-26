@@ -14,12 +14,14 @@ categories = ["multimedia", "network-programming", "web-programming"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-moq-transport = { path = "../moq-transport", version = "0.5" }
+moq-transfork = { path = "../moq-transfork", version = "0.1" }
 moq-native = { path = "../moq-native", version = "0.3" }
 url = "2"
 
 # Async stuff
 tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+bytes = "1"
 
 # CLI, logging, error handling
 clap = { version = "4", features = ["derive"] }

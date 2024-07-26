@@ -8,10 +8,10 @@ use tokio::io::AsyncReadExt;
 
 use moq_native::quic;
 use moq_pub::Media;
-use moq_transport::{serve, session::Publisher};
+use moq_transfork::prelude::*;
 
 #[derive(Parser, Clone)]
-pub struct Cli {
+pub struct Config {
 	/// Listen for UDP packets on the given address.
 	#[arg(long, default_value = "[::]:0")]
 	pub bind: net::SocketAddr,
@@ -37,47 +37,32 @@ pub struct Cli {
 	/// The TLS configuration.
 	#[command(flatten)]
 	pub tls: moq_native::tls::Args,
+
+	/// Log configuration.
+	#[command(flatten)]
+	pub log: moq_native::log::Args,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-	env_logger::init();
+	let config = Config::parse();
+	config.log.init();
 
-	// Disable tracing so we don't get a bunch of Quinn spam.
-	let tracer = tracing_subscriber::FmtSubscriber::builder()
-		.with_max_level(tracing::Level::WARN)
-		.finish();
-	tracing::subscriber::set_global_default(tracer).unwrap();
-
-	let cli = Cli::parse();
-
-	let (writer, _, reader) = serve::Tracks::new(cli.name).produce();
-	let media = Media::new(writer)?;
-
-	let tls = cli.tls.load()?;
+	let tls = config.tls.load()?;
 
 	let quic = quic::Endpoint::new(moq_native::quic::Config {
-		bind: cli.bind,
+		bind: config.bind,
 		tls: tls.clone(),
 	})?;
 
-	log::info!("connecting to relay: url={}", cli.url);
-	let session = quic.client.connect(&cli.url).await?;
+	let session = quic.client.connect(&config.url).await?;
+	let mut publisher = moq_transfork::Client::new(session).publisher().await?;
 
-	let (session, mut publisher) = Publisher::connect(session)
-		.await
-		.context("failed to create MoQ Transport publisher")?;
+	let (writer, reader) = Broadcast::new(config.name).produce();
+	let mut media = Media::new(writer)?;
 
-	tokio::select! {
-		res = session.run() => res.context("session error")?,
-		res = run_media(media) => res.context("media error")?,
-		res = publisher.announce(reader) => res.context("publisher error")?,
-	}
+	publisher.announce(reader).await.context("failed to announce")?;
 
-	Ok(())
-}
-
-async fn run_media(mut media: Media) -> anyhow::Result<()> {
 	let mut input = tokio::io::stdin();
 	let mut buf = BytesMut::new();
 

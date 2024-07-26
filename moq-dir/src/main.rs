@@ -1,21 +1,22 @@
 use anyhow::Context;
 use clap::Parser;
 use futures::{stream::FuturesUnordered, StreamExt};
+use moq_transfork::prelude::*;
 
 use std::net;
 
 use moq_native::{quic, tls};
 
+mod connection;
 mod listing;
 mod listings;
-mod session;
 
+pub use connection::*;
 pub use listing::*;
 pub use listings::*;
-pub use session::*;
 
 #[derive(Clone, clap::Parser)]
-pub struct Cli {
+pub struct Config {
 	/// Listen for UDP packets on the given address.
 	#[arg(long, default_value = "[::]:443")]
 	pub bind: net::SocketAddr,
@@ -24,52 +25,44 @@ pub struct Cli {
 	#[command(flatten)]
 	pub tls: tls::Args,
 
-	/// Aggregate all announcements received with this namespace prefix.
+	/// Aggregate all announcements received with this broadcast prefix.
 	/// The list of announcements that match are available as tracks, ending with /.
 	///
-	/// ex. ANNOUNCE namespace=public/meeting/12342/alice
-	/// ex. TRACK    namespace=public/ name=meeting/12342/ payload=alice
+	/// ex. ANNOUNCE broadcast=public/meeting/12342/alice
+	/// ex. TRACK    broadcast=public/ name=meeting/12342/ payload=alice
 	///
 	/// Any announcements that don't match are ignored.
 	#[arg(long, default_value = ".")]
-	pub namespace: String,
+	pub broadcast: String,
+
+	/// Log configuration.
+	#[command(flatten)]
+	pub log: moq_native::log::Args,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-	env_logger::init();
+	let config = Config::parse();
+	config.log.init();
 
-	// Disable tracing so we don't get a bunch of Quinn spam.
-	let tracer = tracing_subscriber::FmtSubscriber::builder()
-		.with_max_level(tracing::Level::WARN)
-		.finish();
-	tracing::subscriber::set_global_default(tracer).unwrap();
+	let tls = config.tls.load()?;
 
-	let cli = Cli::parse();
-	let tls = cli.tls.load()?;
-
-	let quic = quic::Endpoint::new(quic::Config { bind: cli.bind, tls })?;
+	let quic = quic::Endpoint::new(quic::Config { bind: config.bind, tls })?;
 	let mut quic = quic.server.context("missing server certificate")?;
 
-	let listings = Listings::new(cli.namespace);
+	let broadcast = Broadcast::new(config.broadcast);
+	let listings = Listings::new(broadcast);
 
 	let mut tasks = FuturesUnordered::new();
 
-	log::info!("listening on {}", quic.local_addr()?);
-
 	loop {
 		tokio::select! {
-			res = quic.accept() => {
-				let session = res.context("failed to accept QUIC connection")?;
-				let session = Session::new(session, listings.clone());
-
-				tasks.push(async move {
-					if let Err(err) = session.run().await {
-						log::warn!("session terminated: {}", err);
-					}
-				});
+			Some(session) = quic.accept() => {
+				let connection = Connection::new(session, listings.clone());
+				tasks.push(connection.run());
 			},
-			res = tasks.next(), if !tasks.is_empty() => res.unwrap(),
+			_ = tasks.next(), if !tasks.is_empty() => {},
+			else => return Ok(()),
 		}
 	}
 }

@@ -2,13 +2,11 @@ use anyhow::Context;
 use bytes::BytesMut;
 use std::collections::{HashSet, VecDeque};
 
-use moq_transport::serve::{
-	GroupReader, GroupWriter, GroupsReader, GroupsWriter, ServeError, TrackReader, TrackReaderMode, TrackWriter,
-};
+use moq_transfork::prelude::*;
 
 pub struct ListingWriter {
 	track: Option<TrackWriter>,
-	groups: Option<GroupsWriter>,
+	groups: Option<TrackWriter>,
 	group: Option<GroupWriter>,
 
 	current: HashSet<String>,
@@ -24,14 +22,14 @@ impl ListingWriter {
 		}
 	}
 
-	pub fn insert(&mut self, name: String) -> Result<(), ServeError> {
+	pub fn insert(&mut self, name: String) -> Result<(), Closed> {
 		if !self.current.insert(name.clone()) {
-			return Err(ServeError::Duplicate);
+			return Err(Closed::Duplicate);
 		}
 
 		match self.group {
 			// Create a delta if the current group is small enough.
-			Some(ref mut group) if self.current.len() < 2 * group.len() => {
+			Some(ref mut group) if self.current.len() < 2 * group.total() => {
 				let msg = format!("+{}", name);
 				group.write(msg.into())?;
 			}
@@ -42,14 +40,15 @@ impl ListingWriter {
 		Ok(())
 	}
 
-	pub fn remove(&mut self, name: &str) -> Result<(), ServeError> {
+	pub fn remove(&mut self, name: &str) -> Result<(), Closed> {
 		if !self.current.remove(name) {
-			return Err(ServeError::NotFound);
+			// TODO this is a wrong error message.
+			return Err(Closed::Unknown);
 		}
 
 		match self.group {
 			// Create a delta if the current group is small enough.
-			Some(ref mut group) if self.current.len() < 2 * group.len() => {
+			Some(ref mut group) if self.current.len() < 2 * group.total() => {
 				let msg = format!("-{}", name);
 				group.write(msg.into())?;
 			}
@@ -60,14 +59,13 @@ impl ListingWriter {
 		Ok(())
 	}
 
-	fn snapshot(&mut self) -> Result<GroupWriter, ServeError> {
+	fn snapshot(&mut self) -> Result<GroupWriter, Closed> {
 		let mut groups = match self.groups.take() {
 			Some(groups) => groups,
-			None => self.track.take().unwrap().groups()?,
+			None => self.track.take().unwrap(),
 		};
 
-		let priority = self.group.as_ref().map(|g| g.group_id + 1).unwrap_or(0);
-		let mut group = groups.append(priority)?;
+		let mut group = groups.append()?;
 
 		let mut msg = BytesMut::new();
 		for name in &self.current {
@@ -101,7 +99,6 @@ pub struct ListingReader {
 	track: TrackReader,
 
 	// Keep track of the current group.
-	groups: Option<GroupsReader>,
 	group: Option<GroupReader>,
 
 	// The current state of the listing.
@@ -115,7 +112,6 @@ impl ListingReader {
 	pub fn new(track: TrackReader) -> Self {
 		Self {
 			track,
-			groups: None,
 			group: None,
 
 			current: HashSet::new(),
@@ -128,15 +124,8 @@ impl ListingReader {
 			return Ok(Some(delta));
 		}
 
-		if self.groups.is_none() {
-			self.groups = match self.track.mode().await? {
-				TrackReaderMode::Groups(groups) => Some(groups),
-				_ => anyhow::bail!("expected groups mode"),
-			};
-		};
-
 		if self.group.is_none() {
-			self.group = Some(self.groups.as_mut().unwrap().next().await?.context("empty track")?);
+			self.group = Some(self.track.next().await?.context("empty track")?);
 		}
 
 		let mut group_done = false;
@@ -144,7 +133,7 @@ impl ListingReader {
 
 		loop {
 			tokio::select! {
-				next = self.groups.as_mut().unwrap().next(), if !groups_done => {
+				next = self.track.next(), if !groups_done => {
 					if let Some(next) = next? {
 						self.group = Some(next);
 						group_done = false;
@@ -152,7 +141,7 @@ impl ListingReader {
 						groups_done = true;
 					}
 				},
-				object = self.group.as_mut().unwrap().read_next(), if !group_done => {
+				object = self.group.as_mut().unwrap().read(), if !group_done => {
 					let payload = match object? {
 						Some(object) => object,
 						None => {
@@ -163,7 +152,7 @@ impl ListingReader {
 
 					if payload.is_empty() {
 						anyhow::bail!("empty payload");
-					} else if self.group.as_mut().unwrap().pos() == 1 {
+					} else if self.group.as_mut().unwrap().current() == 1 {
 						// This is a full snapshot, not a delta
 						let set = HashSet::from_iter(payload.split(|&b| b == b'\n').map(|s| String::from_utf8_lossy(s).to_string()));
 
