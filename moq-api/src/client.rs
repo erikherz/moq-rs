@@ -41,7 +41,7 @@ impl Client {
                 let regex_parts: Vec<&str> = original_path[regex_pos + 10..].split('/').collect();
                 if regex_parts.len() == 3 {
                     regex_values = (
-                        regex_parts[0].to_string(),  // "norcal"
+                        regex_parts[0].to_string(),  // "ohio"
                         regex_parts[1].to_string(),  // "origin"
                         regex_parts[2].to_string(),  // "regional"
                     );
@@ -69,20 +69,17 @@ impl Client {
             origin.url = Url::parse(&format!("https://{}", edge_value))?;
             println!("Modified URL with do_edge: {}", origin.url);
         } else if do_regex {
-            // Apply the regex transformation based on the requirement
-            if origin.url.as_str().contains(&regex_values.0) {
-                // Check if the search term is in the URL before attempting replacement
+            // Only modify the URL if the 'contains' value is not found
+            if !origin.url.as_str().contains(&regex_values.0) {
                 if origin.url.as_str().contains(&regex_values.1) {
                     let new_url = origin.url.as_str().replace(&regex_values.1, &regex_values.2);
                     origin.url = Url::parse(&new_url)?;
                     println!("Modified URL with do_regex: {}", origin.url);
                 } else {
-                    // If search term is not found, leave the URL as-is
                     println!("No replacement needed, URL remains: {}", origin.url);
                 }
             } else {
-                // If 'contains' value is not in the URL, do not modify the URL
-                println!("'Contains' value not found in URL, no modification applied.");
+                println!("'Contains' value found in URL, no modification applied: {}", origin.url);
             }
         }
 
