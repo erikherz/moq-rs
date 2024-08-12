@@ -71,9 +71,18 @@ impl Client {
         } else if do_regex {
             // Apply the regex transformation based on the requirement
             if origin.url.as_str().contains(&regex_values.0) {
-                let new_url = origin.url.as_str().replace(&regex_values.1, &regex_values.2);
-                origin.url = Url::parse(&new_url)?;
-                println!("Modified URL with do_regex: {}", origin.url);
+                // Check if the search term is in the URL before attempting replacement
+                if origin.url.as_str().contains(&regex_values.1) {
+                    let new_url = origin.url.as_str().replace(&regex_values.1, &regex_values.2);
+                    origin.url = Url::parse(&new_url)?;
+                    println!("Modified URL with do_regex: {}", origin.url);
+                } else {
+                    // If search term is not found, leave the URL as-is
+                    println!("No replacement needed, URL remains: {}", origin.url);
+                }
+            } else {
+                // If 'contains' value is not in the URL, do not modify the URL
+                println!("'Contains' value not found in URL, no modification applied.");
             }
         }
 
